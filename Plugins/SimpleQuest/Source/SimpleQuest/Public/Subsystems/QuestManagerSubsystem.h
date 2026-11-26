@@ -118,6 +118,9 @@ class SIMPLEQUEST_API UQuestManagerSubsystem : public UGameInstanceSubsystem
 	 * it shares a class with the replacement-orchestrator variation points, not because holds are internal.
 	 */
 	friend class FQuestAdvancementHoldTestAccess;
+	
+	/** Run-teardown tests. Same reason: the teardown is private, and the hold API it exercises is protected. */
+	friend class FQuestRunTeardownTestAccess;
 
 	/** Deferred activations ask whether a hold applies before going live. */
 	friend class UQuestNodeBase;
@@ -378,6 +381,25 @@ protected:
 
 	/** Clears the clearable state mirror for every path a quest has resolved through (append-only registry untouched). Backs ResetQuestRunState. */
 	virtual void ResetQuestRunState(FGameplayTag QuestTag);
+	
+	/**
+	 * Ends a questline's current run and keeps its history. Backs USimpleQuestBlueprintLibrary::EndQuestlineRun. Every Live
+	 * or PendingGiver node in the graph is deactivated with EDeactivationSource::RunEnded, which observers hear and which
+	 * fires nothing wired to a Deactivated output; every armed node is disarmed, utility nodes included; parked activations
+	 * and holds on the graph's tags are dropped; the transient facts the run leaves behind (Deactivated, Blocked) and its
+	 * path mirrors are cleared. Started, Completed, and the resolution registry are untouched, so the questline still reads
+	 * as having run. Yields to a pending save restore, as ActivateQuestlineGraph does.
+	 */
+	virtual void EndQuestlineRun(UQuestlineGraph* Graph);
+
+	/** Ends every registered run without publishing, ahead of a snapshot replacing the state they were built from. */
+	virtual void EndAllQuestlineRuns();
+
+	/**
+	 * Returns SimpleQuest to a new game: ends every run, applies an empty snapshot (no facts, no history, quest time zero),
+	 * and drops any staged restore. Backs USimpleQuestBlueprintLibrary::ResetQuestState.
+	 */
+	virtual void ResetQuestState();
 
 private:
 	void LoadCompiledDisplayIni() const;
@@ -700,6 +722,43 @@ private:
 	 */
 	void WireStepTriggerSubscriptions(UQuestStep* Step);
 	
+	/**
+	 * Undoes WireStepTriggerSubscriptions for one Step: drops its trigger subscription and every target-class filter it
+	 * registered. One implementation for every site that ends a Step's live phase (graph resolution, external resolve,
+	 * deactivation, a run's teardown), because the class filters used to be added on every activation and removed by none,
+	 * so a Step that ran twice forwarded each matching trigger twice.
+	 */
+	void UnwireStepTriggerSubscriptions(FGameplayTag StepTag);
+
+	/** What one run teardown did, for its summary log line and for tests. */
+	struct FQuestRunTeardownTally
+	{
+		int32 EndedLifecycles = 0;     // Live or PendingGiver nodes ended as RunEnded (publish mode only)
+		int32 ReleasedObjectives = 0;  // Steps that held an objective
+		int32 DisarmedNodes = 0;       // nodes armed on a prerequisite
+		int32 DroppedParked = 0;       // parked activations aimed at the run
+		int32 DroppedHolds = 0;
+		int32 ClearedFacts = 0;        // leftover Blocked / Deactivated facts removed (publish mode only)
+	};
+
+	/**
+	 * The one teardown behind End Questline Run, a snapshot being applied, and a new game. Instances are the run's
+	 * registered node instances; IdentityTags are the questline identities they belong to. bPublish selects the mode: true
+	 * ends every active lifecycle as a RunEnded deactivation that observers hear, then clears what it leaves behind; false
+	 * (a snapshot is about to replace the facts wholesale) touches no fact and publishes nothing. Both modes release
+	 * objectives (their deactivation hook fires), disarm every armed node, and drop the run's parked activations and holds.
+	 */
+	FQuestRunTeardownTally TearDownRun(const TArray<UQuestNodeBase*>& Instances, const TArray<FGameplayTag>& IdentityTags, bool bPublish);
+
+	/** Writes Deactivated, then publishes FQuestDeactivatedEvent (plus the trigger-side wrap for a Step). Shared by SetQuestDeactivated and TearDownRun. */
+	void MarkQuestDeactivated(FGameplayTag QuestTag, UQuestNodeBase* Node, EDeactivationSource Source, const FQuestEventPayload& Context);
+
+	/** Bound to UQuestStateSubsystem's snapshot delegates in Initialize. */
+	void HandleSnapshotApplying();
+	void HandleSnapshotApplied();
+	FDelegateHandle SnapshotApplyingHandle;
+	FDelegateHandle SnapshotAppliedHandle;
+	
 	UFUNCTION()
 	void HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity);
 	UFUNCTION()
@@ -818,7 +877,8 @@ private:
 
 	/**
 	 * Deactivated → Deactivate wiring, forwarded for every node a deactivation reaches - active or not. Split out of
-	 * HandleNodeDeactivatedEvent so the pass-through path (which publishes no event) still relays the teardown.
+	 * HandleNodeDeactivatedEvent so the pass-through path (which publishes no event) still relays the teardown. Never
+	 * called for EDeactivationSource::RunEnded: a run's teardown reaches every node of the run itself.
 	 */
 	void CascadeDeactivation(FGameplayTag QuestTag, EDeactivationSource Source);
 

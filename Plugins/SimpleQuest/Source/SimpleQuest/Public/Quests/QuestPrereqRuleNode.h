@@ -34,6 +34,9 @@ protected:
 	virtual void OnRegisteredWithManager() override;
 	virtual void ResetTransientState() override;
 
+	/** A rule is a standing claim about the present; a snapshot just replaced the present wholesale, so re-check it. */
+	virtual void OnQuestStateReplaced() override { TryPublishRule(); }
+
 private:
 	/** The fact written to WorldState when Expression evaluates true. */
 	UPROPERTY() FGameplayTag GroupTag;

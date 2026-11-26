@@ -9,3 +9,10 @@ void UQuest::ResetTransientState()
 	PendingEntryActivations.Reset();
 	ResolvedByEvents.Reset();
 }
+
+void UQuest::EndRun()
+{
+	Super::EndRun();
+	PendingEntryActivations.Reset();
+	ResolvedByEvents.Reset();
+}

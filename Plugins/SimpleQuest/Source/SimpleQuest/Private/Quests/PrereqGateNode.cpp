@@ -7,7 +7,7 @@
 
 void UPrereqGateNode::ActivateInternal(FGameplayTag InContextualTag)
 {
-	// Intentionally skips Super — gate is a utility node and does not write Live or publish FQuestStartedEvent.
+	// Intentionally skips Super - gate is a utility node and does not write Live or publish FQuestStartedEvent.
 	// The prereq evaluation + deferral happens in Super::Activate; this method runs when prereqs are confirmed
 	// satisfied (immediately at activation, or after deferred wake-up via the OnPrereq* handlers).
 
@@ -20,7 +20,7 @@ void UPrereqGateNode::ActivateInternal(FGameplayTag InContextualTag)
 	if (Incoming.IsValid() && Incoming == LastFiredEventID)
 	{
 		UE_LOG(LogSimpleQuestActivation, Verbose,
-			TEXT("UPrereqGateNode: skipping redundant fire — already fired for this cascade event (eventGuid=%s, incoming=%s)"),
+			TEXT("UPrereqGateNode: skipping redundant fire - already fired for this cascade event (eventGuid=%s, incoming=%s)"),
 			*Incoming.AuthoredNodeGuid.ToString(EGuidFormats::Short),
 			*InContextualTag.ToString());
 		return;
@@ -39,3 +39,10 @@ void UPrereqGateNode::ResetTransientState()
 	Super::ResetTransientState();
 	LastFiredEventID = FOriginatingEventID{};
 }
+
+void UPrereqGateNode::EndRun()
+{
+	Super::EndRun();
+	LastFiredEventID = FOriginatingEventID{};
+}
+

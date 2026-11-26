@@ -503,6 +503,8 @@ public:
 	/**
 	 * Restores the two data layers from a snapshot: bulk-sets WorldState, overwrites the registries, rebuilds the
 	 * parallel indices, and fires the registry/fact "refresh" multicasts. Returns false only on an unrecoverable version.
+	 * REPLACES the session rather than merging into it: every questline's run ends first (live objectives released, armed
+	 * nodes disarmed, parked activations and holds dropped), with no events, since nothing is transitioning.
 	 * Restores DATA only - it does not rebuild live objectives or re-arm deferred activations. Lower-level C++ primitive:
 	 * the Blueprint entry point is USimpleQuestBlueprintLibrary::ApplyQuestSnapshot, which pairs this with the stash the
 	 * per-graph restore consumes. Native callers composing their own load flow may still call this directly.
@@ -513,7 +515,14 @@ private:
 	friend class UQuestManagerSubsystem;
 	/** Test-only: lets a fixture populate KnownQuests without standing up a manager and a compiled graph. */
 	friend class FQuestObserverDedupeTestAccess;
-
+	
+	/**
+	 * Fired at the start and at the end of ApplySnapshot, for the manager (a friend) to bind: before, it ends every run the
+	 * snapshot is about to replace; after, it lets standing claims re-check facts that arrived without per-fact events.
+	 */
+	FSimpleMulticastDelegate OnSnapshotApplying;
+	FSimpleMulticastDelegate OnSnapshotApplied;
+	
 	/**
 	 * The lookup behind the three display getters, with one rule for a missing record: a KNOWN tag without one is a
 	 * node authored without a display payload, which is ordinary and stays quiet; an UNKNOWN tag is the case worth a

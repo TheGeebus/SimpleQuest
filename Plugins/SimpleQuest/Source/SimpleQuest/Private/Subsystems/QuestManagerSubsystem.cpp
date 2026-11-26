@@ -44,6 +44,7 @@
 #include "Quests/Types/QuestEventPayload.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Quests/Types/QuestOutcomeTags.h"
+#include "Quests/Types/SimpleQuestSaveSnapshot.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "StructUtils/InstancedStruct.h"
 #include "Subsystems/SignalSubsystem.h"
@@ -166,6 +167,13 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
         WorldState = GameInstance->GetSubsystem<UWorldStateSubsystem>();
         QuestStateSubsystem = GameInstance->GetSubsystem<UQuestStateSubsystem>();
         QuestSignalSubsystem = GameInstance->GetSubsystem<USignalSubsystem>();
+        if (QuestStateSubsystem)
+        {
+            // A snapshot replaces the session, it doesn't merge into it: end every run before the facts are swapped, and let
+            // standing claims re-check once they have been.
+            SnapshotApplyingHandle = QuestStateSubsystem->OnSnapshotApplying.AddUObject(this, &UQuestManagerSubsystem::HandleSnapshotApplying);
+            SnapshotAppliedHandle = QuestStateSubsystem->OnSnapshotApplied.AddUObject(this, &UQuestManagerSubsystem::HandleSnapshotApplied);
+        }
         if (QuestSignalSubsystem)
         {
             GivenDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestGivenEvent>(Tag_Channel_QuestGiven, this, &UQuestManagerSubsystem::HandleGiveQuestEvent);
@@ -257,6 +265,11 @@ void UQuestManagerSubsystem::Deinitialize()
         EnablementWatchHandles.Reset();
         EnablementWatches.Reset();
         RecentGiverActors.Reset();
+    }
+    if (QuestStateSubsystem)
+    {
+        QuestStateSubsystem->OnSnapshotApplying.Remove(SnapshotApplyingHandle);
+        QuestStateSubsystem->OnSnapshotApplied.Remove(SnapshotAppliedHandle);
     }
     DisarmRestoreOnNextLevelLoad();
     Super::Deinitialize();
@@ -790,6 +803,296 @@ void UQuestManagerSubsystem::ResetQuestRunState(FGameplayTag QuestTag)
             ClearedPaths.Add(Entry.PathIdentity);
         }
     }
+}
+
+void UQuestManagerSubsystem::EndQuestlineRun(UQuestlineGraph* Graph)
+{
+    if (!Graph) return;
+
+    // Yield to a pending save restore, exactly as ActivateQuestlineGraph does. A level change caused by a load runs the old
+    // level's EndPlay AFTER the snapshot was applied, so the state here is the save's, not this level's run - and ending it
+    // would undo the load the player just asked for.
+    if (PendingRestoreGraphs.Contains(FSoftObjectPath(Graph)))
+    {
+        UE_LOG(LogSimpleQuestActivation, Log,
+            TEXT("EndQuestlineRun: '%s' is pending a save restore - its state belongs to the save, not to a run. Skipped."),
+            *Graph->GetName());
+        return;
+    }
+
+    // This graph's REGISTERED instances only. A key registered to a different instance belongs to whichever graph
+    // registered it first (a rule monitor shared across graphs), so it is that graph's to end.
+    TArray<UQuestNodeBase*> Instances;
+    for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : Graph->GetCompiledNodes())
+    {
+        if (Pair.Value && LoadedNodeInstances.FindRef(Pair.Key) == Pair.Value)
+        {
+            Instances.AddUnique(Pair.Value.Get());
+        }
+    }
+    if (Instances.IsEmpty())
+    {
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("EndQuestlineRun: '%s' was never registered this session - there is no run to end."),
+            *Graph->GetName());
+        return;
+    }
+
+    const FGameplayTag IdentityTag = Graph->GetIdentityTag();
+    TArray<FGameplayTag> IdentityTags;
+    if (IdentityTag.IsValid()) IdentityTags.Add(IdentityTag);
+
+    const FQuestRunTeardownTally Tally = TearDownRun(Instances, IdentityTags, true);
+    UE_LOG(LogSimpleQuestActivation, Log,
+        TEXT("EndQuestlineRun: '%s' - ended %d lifecycle(s), released %d objective(s), disarmed %d armed node(s), dropped %d parked ")
+        TEXT("activation(s) and %d hold(s), cleared %d leftover fact(s). History kept: Started, Completed, and the resolution registry."),
+        *Graph->GetName(),
+        Tally.EndedLifecycles,
+        Tally.ReleasedObjectives,
+        Tally.DisarmedNodes,
+        Tally.DroppedParked,
+        Tally.DroppedHolds,
+        Tally.ClearedFacts);
+
+    // The run is over; whether the questline can START again is its own setting, not this call's. Said here, where the
+    // designer acted, and not only in the skip line a later Start Questline prints.
+    if (Graph->GetResettableReplay() != EResettableReplay::Enabled && FQuestLifecycleQuery::IsStarted(WorldState, IdentityTag))
+    {
+        UE_LOG(LogSimpleQuestActivation, Log,
+            TEXT("EndQuestlineRun: '%s' has Resettable Replay off, so a later Start Questline will skip it as already started. ")
+            TEXT("Turn Resettable Replay on at the questline level if it is meant to run again."),
+            *Graph->GetName());
+    }
+}
+
+void UQuestManagerSubsystem::EndAllQuestlineRuns()
+{
+    // Every registered instance, once each - alias keys share an instance.
+    TSet<UQuestNodeBase*> Unique;
+    for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
+    {
+        if (Pair.Value) Unique.Add(Pair.Value.Get());
+    }
+    const TArray<UQuestNodeBase*> Instances = Unique.Array();
+
+    TArray<FGameplayTag> IdentityTags;
+    LiveGraphsByIdentity.GetKeys(IdentityTags);
+
+    const FQuestRunTeardownTally Tally = TearDownRun(Instances, IdentityTags, false);
+    if (Tally.ReleasedObjectives + Tally.DisarmedNodes + Tally.DroppedParked + Tally.DroppedHolds > 0)
+    {
+        UE_LOG(LogSimpleQuestActivation, Log,
+            TEXT("EndAllQuestlineRuns: a snapshot is replacing the session - released %d objective(s), disarmed %d armed node(s), ")
+            TEXT("dropped %d parked activation(s) and %d hold(s) across %d instance(s)."),
+            Tally.ReleasedObjectives,
+            Tally.DisarmedNodes,
+            Tally.DroppedParked,
+            Tally.DroppedHolds,
+            Instances.Num());
+    }
+    else
+    {
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("EndAllQuestlineRuns: a snapshot is replacing the session - nothing was running (%d instance(s))."),
+            Instances.Num());
+    }
+}
+
+void UQuestManagerSubsystem::ResetQuestState()
+{
+    if (!QuestStateSubsystem)
+    {
+        UE_LOG(LogSimpleQuestActivation, Warning, TEXT("ResetQuestState: no QuestStateSubsystem - nothing reset."));
+        return;
+    }
+
+    // A new game is a load with nothing in it. Applying the empty snapshot ends every run first (HandleSnapshotApplying),
+    // then clears every fact and all history and restarts quest time at zero.
+    QuestStateSubsystem->ApplySnapshot(FSimpleQuestSaveSnapshot());
+
+    // And nothing is left staged to restore over it on the next level load.
+    StashPendingRestore({}, {}, {});
+    DisarmRestoreOnNextLevelLoad();
+
+    UE_LOG(LogSimpleQuestActivation, Log,
+        TEXT("ResetQuestState: SimpleQuest is at a new game - no facts, no history, quest time zero, no restore staged."));
+}
+
+void UQuestManagerSubsystem::HandleSnapshotApplying()
+{
+    // A snapshot REPLACES the session. Every live objective, armed node, parked activation, and hold was built from the
+    // state about to be swapped out, so end them first; the restore rebuilds whatever the snapshot says is live.
+    EndAllQuestlineRuns();
+}
+
+void UQuestManagerSubsystem::HandleSnapshotApplied()
+{
+    // WorldState took the snapshot's facts in one bulk swap, which publishes no per-fact events, so nothing subscribed to a
+    // fact channel woke for it. Let standing claims (prerequisite rules) re-check against what just arrived.
+    TSet<UQuestNodeBase*> Visited;
+    for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
+    {
+        UQuestNodeBase* Node = Pair.Value;
+        if (!Node || Visited.Contains(Node)) continue;
+        Visited.Add(Node);
+        Node->OnQuestStateReplaced();
+    }
+}
+
+UQuestManagerSubsystem::FQuestRunTeardownTally UQuestManagerSubsystem::TearDownRun(const TArray<UQuestNodeBase*>& Instances, const TArray<FGameplayTag>& IdentityTags, const bool bPublish)
+{
+    FQuestRunTeardownTally Tally;
+
+    TSet<const UQuestNodeBase*> RunInstances;
+    for (const UQuestNodeBase* Instance : Instances)
+    {
+        if (Instance) RunInstances.Add(Instance);
+    }
+
+    // 1. PARKED ACTIVATIONS FIRST. Dropping a hold replays the whole parked queue (step 6), so an activation parked on this
+    // run's content would otherwise be replayed into the run that is ending.
+    Tally.DroppedParked = ParkedActivations.RemoveAll([this, &RunInstances](const FQuestParkedActivation& Parked)
+    {
+        return RunInstances.Contains(LoadedNodeInstances.FindRef(Parked.NodeTagName).Get());
+    });
+
+    // 2. SNAPSHOT WHAT IS ACTIVE BEFORE ANYTHING ENDS. A container's Live and a standalone questline's are derived from their
+    // Steps, so they read inactive the moment the last Step goes - and would never be told the run ended.
+    TArray<FGameplayTag> ActiveSteps;
+    TArray<FGameplayTag> ActiveDerived;
+    for (const UQuestNodeBase* Instance : RunInstances)
+    {
+        if (const UQuestStep* Step = Cast<UQuestStep>(Instance); Step && Step->GetLiveObjective()) ++Tally.ReleasedObjectives;
+        if (Instance->IsAwaitingPrerequisite()) ++Tally.DisarmedNodes;
+
+        const FGameplayTag Tag = Instance->GetContextualTag();
+        if (bPublish && FQuestLifecycleQuery::HasActiveLifecycle(WorldState, Tag))
+        {
+            (Instance->IsStepNode() ? ActiveSteps : ActiveDerived).AddUnique(Tag);
+        }
+    }
+    if (bPublish)
+    {
+        for (const FGameplayTag& IdentityTag : IdentityTags)
+        {
+            if (FQuestLifecycleQuery::HasActiveLifecycle(WorldState, IdentityTag)) ActiveDerived.AddUnique(IdentityTag);
+        }
+    }
+
+    // 3. END EVERY ACTIVE LIFECYCLE, INNER-FIRST - the order a completion runs in. Steps own their state; containers and the
+    // questline derive theirs from it, so deepest-first ends each one after everything inside it. RunEnded is what keeps this
+    // a teardown: SetQuestDeactivated relays nothing and HandleNodeDeactivatedEvent fires no Deactivated output, while
+    // observers still hear that the run ended.
+    for (const FGameplayTag& StepTag : ActiveSteps)
+    {
+        SetQuestDeactivated(StepTag, EDeactivationSource::RunEnded);
+        ++Tally.EndedLifecycles;
+    }
+
+    const auto TagDepth = [](const FGameplayTag& Tag)
+    {
+        int32 Depth = 0;
+        for (const TCHAR Char : Tag.ToString()) { if (Char == TEXT('.')) ++Depth; }
+        return Depth;
+    };
+    ActiveDerived.Sort([&TagDepth](const FGameplayTag& A, const FGameplayTag& B) { return TagDepth(A) > TagDepth(B); });
+    for (const FGameplayTag& Tag : ActiveDerived)
+    {
+        if (FQuestLifecycleQuery::HasActiveLifecycle(WorldState, Tag))
+        {
+            // Still active on its own account - a container waiting on a giver.
+            SetQuestDeactivated(Tag, EDeactivationSource::RunEnded);
+        }
+        else
+        {
+            // Its Steps ending derived it inactive, which writes no Deactivated and tells nobody. Say it ended anyway.
+            MarkQuestDeactivated(Tag, LoadedNodeInstances.FindRef(Tag.GetTagName()), EDeactivationSource::RunEnded, FQuestEventPayload());
+        }
+        ++Tally.EndedLifecycles;
+    }
+
+    // 4. EVERY INSTANCE, BOTH MODES: drop what the manager holds for it, then let the node end its own part - release a live
+    // objective (its deactivation hook fires), disarm a deferred activation, clear per-run scratch.
+    for (UQuestNodeBase* Instance : Instances)
+    {
+        if (!Instance) continue;
+        if (const FGameplayTag Tag = Instance->GetContextualTag(); Tag.IsValid())
+        {
+            UnwireStepTriggerSubscriptions(Tag);
+            if (TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>* Handles = DeferredCompletionPrereqHandles.Find(Tag))
+            {
+                FPrereqLeafSubscription::UnsubscribeAll(QuestSignalSubsystem, *Handles);
+                DeferredCompletionPrereqHandles.Remove(Tag);
+            }
+            DeferredCompletions.Remove(Tag);
+            ClearEnablementWatch(Tag);
+            RecentGiverActors.Remove(Tag);
+        }
+        Instance->EndRun();
+    }
+
+    // 5. PUBLISH MODE: WHAT THE RUN LEAVES BEHIND. Step 3 wrote Deactivated so each broadcast matched the facts, but a run that
+    // has ended is not "deactivated", it is over. So are Blocked, a Deactivated left from earlier in the run on a node the next
+    // run may never reach, and the run's path mirrors.
+    if (bPublish && WorldState)
+    {
+        TArray<FGameplayTag> RunTags = IdentityTags;
+        for (const UQuestNodeBase* Instance : RunInstances)
+        {
+            if (const FGameplayTag Tag = Instance->GetContextualTag(); Tag.IsValid()) RunTags.AddUnique(Tag);
+        }
+
+        for (const FGameplayTag& Tag : RunTags)
+        {
+            // Nothing should still be active. If something is, the teardown missed a lifecycle - report it, don't paper over
+            // it. A container's Live is never cleared by hand: it derives from its Steps, and the Warning is the useful part.
+            if (FQuestLifecycleQuery::HasActiveLifecycle(WorldState, Tag))
+            {
+                UE_LOG(LogSimpleQuestActivation, Warning,
+                    TEXT("TearDownRun: '%s' is still Live or waiting on a giver after its run ended - something outside this run ")
+                    TEXT("is holding it active. A later Start Questline will see it as running."),
+                    *Tag.ToString());
+            }
+            if (FQuestLifecycleQuery::IsBlocked(WorldState, Tag))
+            {
+                RemoveStateFactAcrossPerspectives(Tag, EQuestStateLeaf::Blocked);
+                FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, Tag, LoadedNodeInstances,
+                    FQuestUnblockedEvent(Tag, EDeactivationSource::RunEnded, FQuestEventPayload()));
+                ++Tally.ClearedFacts;
+            }
+            if (FQuestLifecycleQuery::IsDeactivated(WorldState, Tag))
+            {
+                RemoveStateFactAcrossPerspectives(Tag, EQuestStateLeaf::Deactivated);
+                ++Tally.ClearedFacts;
+            }
+            ResetQuestRunState(Tag);
+        }
+    }
+
+    // 6. HOLDS, LAST: everything they could replay into is gone. Publish mode drops the holds on this run's tags, warning per
+    // hold, as a completion does. Silent mode is ending every run, so every hold goes without a warning: a snapshot replacing
+    // the session is not game code forgetting to release.
+    const int32 HoldsBefore = ActiveHolds.Num();
+    if (bPublish)
+    {
+        TSet<FGameplayTag> HoldTags;
+        HoldTags.Append(IdentityTags);
+        for (const UQuestNodeBase* Instance : RunInstances)
+        {
+            HoldTags.Add(Instance->GetContextualTag());
+            HoldTags.Append(Instance->GetAssetScopedAliasTags());
+            HoldTags.Add(Instance->GetLinkedInnerIdentityTag());
+        }
+        for (const FGameplayTag& Tag : HoldTags)
+        {
+            if (Tag.IsValid()) ClearHoldsForEndedQuest(Tag);
+        }
+    }
+    else
+    {
+        ReleaseAllQuestAdvancementHolds();
+    }
+    Tally.DroppedHolds = HoldsBefore - ActiveHolds.Num();
+
+    return Tally;
 }
 
 void UQuestManagerSubsystem::RegisterLoadedNodeInstance(FName Key, UQuestNodeBase* Instance)
@@ -1438,7 +1741,9 @@ void UQuestManagerSubsystem::WireStepTriggerSubscriptions(UQuestStep* Step)
             }
             if (Loaded)
             {
-                ClassFilteredSteps.Add(StepTag, Loaded);
+                // AddUnique: a Step activates again on a replay or a loop-back, and a duplicate pair forwards each matching
+                // trigger once per copy. UnwireStepTriggerSubscriptions removes them when the live phase ends.
+                ClassFilteredSteps.AddUnique(StepTag, Loaded);
             }
         }
 
@@ -1447,6 +1752,25 @@ void UQuestManagerSubsystem::WireStepTriggerSubscriptions(UQuestStep* Step)
         {
             ClassBridgeHandle = QuestSignalSubsystem->SubscribeRawMessage<FQuestTriggerFiredEvent>(Tag_Channel_QuestTrigger, this, &UQuestManagerSubsystem::CheckClassObjectives);
         }
+    }
+}
+
+void UQuestManagerSubsystem::UnwireStepTriggerSubscriptions(FGameplayTag StepTag)
+{
+    if (!StepTag.IsValid()) return;
+
+    if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(StepTag))
+    {
+        if (QuestSignalSubsystem) QuestSignalSubsystem->UnsubscribeMessage(StepTag, *Handle);
+        LiveStepTriggerHandles.Remove(StepTag);
+    }
+
+    // The bridge subscription itself stays: every class-filtered Step shares it, and it costs nothing with no filters.
+    if (const int32 Removed = ClassFilteredSteps.Remove(StepTag); Removed > 0)
+    {
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UnwireStepTriggerSubscriptions: '%s' - dropped %d target-class filter(s)"),
+            *StepTag.ToString(),
+            Removed);
     }
 }
 
@@ -2039,7 +2363,8 @@ void UQuestManagerSubsystem::RetryDeferredActivations()
     for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
     {
         UQuestNodeBase* Node = Pair.Value;
-        if (Node && Node->DeferredContextualTag.IsValid())
+        // IsAwaitingPrerequisite, not the contextual tag: a Prerequisite Gate defers with an invalid one and was never asked.
+        if (Node && Node->IsAwaitingPrerequisite())
         {
             Node->TryActivateDeferred();
             ++Retried;
@@ -2511,14 +2836,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     if (Node->GetContextualTag().IsValid())
     {
         SetQuestResolved(Node->GetContextualTag(), OutcomeTag, ResolvedPath, EQuestResolutionSource::Graph, OriginatingEventID);
-        if (QuestSignalSubsystem)
-        {
-            if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(Node->GetContextualTag()))
-            {
-                QuestSignalSubsystem->UnsubscribeMessage(Node->GetContextualTag(), *Handle);
-                LiveStepTriggerHandles.Remove(Node->GetContextualTag());
-            }
-        }
+        UnwireStepTriggerSubscriptions(Node->GetContextualTag());
     }
 
     PublishQuestEndedEvent(Node, OutcomeTag, EQuestResolutionSource::Graph, FQuestEventPayload(), InheritedForward);
@@ -2780,7 +3098,8 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
     if (!FQuestLifecycleQuery::HasActiveLifecycle(WorldState, QuestTag))
     {
         UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("SetQuestDeactivated: '%s' not active - forwarding deactivate cascade only (pass-through)"), *QuestTag.ToString());
-        CascadeDeactivation(QuestTag, Source);
+        // A run ending relays nothing: its teardown reaches every node of the run itself.
+        if (Source != EDeactivationSource::RunEnded) CascadeDeactivation(QuestTag, Source);
         return;
     }
 
@@ -2805,7 +3124,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 
 	UE_LOG(LogSimpleQuestActivation, Log, TEXT("SetQuestDeactivated: '%s' source=%s"),
 		*QuestTag.ToString(),
-		Source == EDeactivationSource::External ? TEXT("External") : TEXT("Internal"));
+		LexToString(Source));
 
 	// Look up node instance early. Needed for DeactivateInternal and context assembly.
 	UQuestNodeBase* Node = nullptr;
@@ -2842,12 +3161,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
         {
             RemoveStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::Live);
         }
-
-        if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(QuestTag))
-        {
-            if (QuestSignalSubsystem) QuestSignalSubsystem->UnsubscribeMessage(QuestTag, *Handle);
-            LiveStepTriggerHandles.Remove(QuestTag);
-        }
+        UnwireStepTriggerSubscriptions(QuestTag);
 
         if (TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>* Handles = DeferredCompletionPrereqHandles.Find(QuestTag))
         {
@@ -2870,38 +3184,45 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
     // function.
     if (!bWasAlreadyDeactivated)
     {
-        AddStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::Deactivated);
-
-        // Publish with context. Caller-supplied Context (from BP request) overlays onto the framework-assembled
-        // context when a Node is loaded - Instigator / CustomData / lineage from the request layer in; NodeInfo
-        // stays from assembly. No-Node fallback path uses the request Context directly (nothing else to merge).
-        if (QuestSignalSubsystem)
-        {
-            if (Node)
-            {
-                FQuestEventPayload EffectiveContext = OverlayCallerContext(AssembleEventContext(Node, FQuestObjectiveTriggerContext()), Context);
-                FQuestDeactivatedEvent Event(QuestTag, Source, EffectiveContext);
-                FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, Event);
-
-                // Trigger-side wrap on interruption. Steps only - containers don't host trigger components. FinalContext
-                // empty because deactivation has no specific fire driving it; OutcomeTag invalid for the same reason.
-                if (Node->IsStepNode())
-                {
-                    FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestTriggerDeactivatedEvent(
-                        QuestTag, EQuestTriggerEndReason::Interrupted, FGameplayTag(), FQuestObjectiveTriggerContext()));
-                }
-            }
-            else
-            {
-                // Fallback - no instance loaded under this tag. Single publish preserves observability.
-                QuestSignalSubsystem->PublishMessage(QuestTag, FQuestDeactivatedEvent(QuestTag, Source, Context));
-            }
-        }
+        MarkQuestDeactivated(QuestTag, Node, Source, Context);
     }
 
     // Relay the teardown downstream after our own deactivation. Same call the pass-through branch makes, so active
-    // and inactive nodes forward identically - moved off the bus event so the no-publish path still cascades.
-    CascadeDeactivation(QuestTag, Source);
+    // and inactive nodes forward identically - moved off the bus event so the no-publish path still cascades. A run
+    // ending relays nothing: its teardown reaches every node of the run itself.
+    if (Source != EDeactivationSource::RunEnded)
+    {
+        CascadeDeactivation(QuestTag, Source);
+    }
+}
+
+void UQuestManagerSubsystem::MarkQuestDeactivated(FGameplayTag QuestTag, UQuestNodeBase* Node, EDeactivationSource Source, const FQuestEventPayload& Context)
+{
+    AddStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::Deactivated);
+    if (!QuestSignalSubsystem) return;
+
+    // Publish with context. Caller-supplied Context (from BP request) overlays onto the framework-assembled
+    // context when a Node is loaded - Instigator / CustomData / lineage from the request layer in; NodeInfo
+    // stays from assembly. No-Node fallback path uses the request Context directly (nothing else to merge).
+    if (Node)
+    {
+        FQuestEventPayload EffectiveContext = OverlayCallerContext(AssembleEventContext(Node, FQuestObjectiveTriggerContext()), Context);
+        FQuestDeactivatedEvent Event(QuestTag, Source, EffectiveContext);
+        FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, Event);
+
+        // Trigger-side wrap on interruption. Steps only - containers don't host trigger components. FinalContext
+        // empty because deactivation has no specific fire driving it; OutcomeTag invalid for the same reason.
+        if (Node->IsStepNode())
+        {
+            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestTriggerDeactivatedEvent(
+                QuestTag, EQuestTriggerEndReason::Interrupted, FGameplayTag(), FQuestObjectiveTriggerContext()));
+        }
+    }
+    else
+    {
+        // Fallback - no instance loaded under this tag. Single publish preserves observability.
+        QuestSignalSubsystem->PublishMessage(QuestTag, FQuestDeactivatedEvent(QuestTag, Source, Context));
+    }
 }
 
 void UQuestManagerSubsystem::CascadeDeactivation(FGameplayTag QuestTag, EDeactivationSource Source)
@@ -2955,6 +3276,15 @@ void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, co
     if (!NodePtr) return;
 
     UQuestNodeBase* Node = *NodePtr;
+    
+    // A run ending is a teardown, not a gameplay transition: nothing wired to Deactivated → Activate fires for it.
+    if (Event.Source == EDeactivationSource::RunEnded)
+    {
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleNodeDeactivatedEvent: '%s' - run ended, %d activate-on-deactivation route(s) not fired"),
+            *Channel.ToString(),
+            Node->GetNextNodesOnDeactivation().Num());
+        return;
+    }
 
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleNodeDeactivatedEvent: '%s' - activating %d, cascading deactivation to %d"),
         *Channel.ToString(),
@@ -3266,13 +3596,9 @@ void UQuestManagerSubsystem::HandleResolveRequest(FGameplayTag Channel, const FQ
     SetQuestResolved(QuestTag, Event.OutcomeTag, NAME_None, EQuestResolutionSource::External);
 
     // Live-step bookkeeping cleanup mirroring ChainToNextNodes - defensive against the non-Live cases (Find returns null).
+    UnwireStepTriggerSubscriptions(QuestTag);
     if (QuestSignalSubsystem)
     {
-        if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(QuestTag))
-        {
-            QuestSignalSubsystem->UnsubscribeMessage(QuestTag, *Handle);
-            LiveStepTriggerHandles.Remove(QuestTag);
-        }
         if (TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>* Handles = DeferredCompletionPrereqHandles.Find(QuestTag))
         {
             FPrereqLeafSubscription::UnsubscribeAll(QuestSignalSubsystem, *Handles);

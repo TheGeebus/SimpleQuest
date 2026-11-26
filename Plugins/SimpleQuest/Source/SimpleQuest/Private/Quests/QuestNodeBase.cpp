@@ -30,12 +30,7 @@ void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
     if (bBypassPrerequisitesOnce)
     {
         bBypassPrerequisitesOnce = false;
-        if (DeferredContextualTag.IsValid())
-        {
-            USignalSubsystem* Signals = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<USignalSubsystem>() : nullptr;
-            FPrereqLeafSubscription::UnsubscribeAll(Signals, PrereqSubscriptionHandles);
-            DeferredContextualTag = FGameplayTag::EmptyTag;
-        }
+        CancelDeferredActivation();
         ActivateInternal(InContextualTag);
         return;
     }
@@ -66,12 +61,7 @@ void UQuestNodeBase::ActivateInternal(FGameplayTag InContextualTag)
 void UQuestNodeBase::DeactivateInternal(FGameplayTag InContextualTag)
 {
     // Cancel any deferred prereq subscriptions that are still live
-    if (DeferredContextualTag.IsValid())
-    {
-        USignalSubsystem* Signals = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<USignalSubsystem>() : nullptr;
-        FPrereqLeafSubscription::UnsubscribeAll(Signals, PrereqSubscriptionHandles);
-        DeferredContextualTag = FGameplayTag::EmptyTag;
-    }
+    CancelDeferredActivation();
 }
 
 void UQuestNodeBase::ForwardActivation()
@@ -85,6 +75,30 @@ void UQuestNodeBase::ResetTransientState()
     // unsubscribing is safe: the owning subsystem is gone, there's nothing left to unsubscribe from.
     PrereqSubscriptionHandles.Reset();
     DeferredContextualTag = FGameplayTag::EmptyTag;
+    bWasGiverGated = false;
+    bBypassPrerequisitesOnce = false;
+    PendingActivationContext = FQuestObjectiveRuntimeContext{};
+    LastIncomingEventID = FOriginatingEventID{};
+}
+
+bool UQuestNodeBase::CancelDeferredActivation()
+{
+    DeferredContextualTag = FGameplayTag::EmptyTag;
+    if (!IsAwaitingPrerequisite()) return false;
+
+    const int32 Channels = PrereqSubscriptionHandles.Num();
+    USignalSubsystem* Signals = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<USignalSubsystem>() : nullptr;
+    FPrereqLeafSubscription::UnsubscribeAll(Signals, PrereqSubscriptionHandles);
+
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestNodeBase::CancelDeferredActivation : '%s' disarmed - released %d prerequisite channel(s)"),
+        GetContextualTag().IsValid() ? *GetContextualTag().ToString() : *GetName(),
+        Channels);
+    return true;
+}
+
+void UQuestNodeBase::EndRun()
+{
+    CancelDeferredActivation();
     bWasGiverGated = false;
     bBypassPrerequisitesOnce = false;
     PendingActivationContext = FQuestObjectiveRuntimeContext{};

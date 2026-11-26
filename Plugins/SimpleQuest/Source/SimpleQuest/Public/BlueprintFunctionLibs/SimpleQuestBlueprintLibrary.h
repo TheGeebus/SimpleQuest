@@ -332,6 +332,20 @@ public:
         const FQuestObjectiveActivationParams& Params = FQuestObjectiveActivationParams());
     
     /**
+     * End a questline's current run and keep its history. Everything the run has in progress is torn down: objectives in
+     * play, steps waiting on a giver or a prerequisite, held advancement. Nothing wired to a Deactivated output fires, and
+     * observers hear a Deactivated event whose Source is Run Ended. What the run already did stays done - Started,
+     * Completed, and its resolution history are untouched, so anything you derive from them (a level unlock, say) survives.
+     *
+     * For a questline that lives entirely inside one level: call this from that level's End Play, while the level's actors
+     * still exist, once for each questline the level owns. Whether the questline can START again afterward is its own
+     * Resettable Replay setting, so turn that on for content meant to run more than once. A questline that isn't loaded has
+     * no run, so calling this on one does nothing; while a loaded save is waiting to restore, it is skipped.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext"))
+    static void EndQuestlineRun(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph);
+    
+    /**
      * Restore a questline from a loaded save. Call AFTER Apply Snapshot (on the Quest State subsystem) has restored the
      * quest facts and history - this rebuilds the objectives the save recorded as in-progress, without re-running the
      * questline from its start. Safe to call on every questline graph in your game on load; graphs that weren't in
@@ -377,6 +391,16 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Save Load", meta = (WorldContext = "WorldContext"))
     static void RestoreQuestGraphs(const UObject* WorldContext);
+    
+    /**
+     * Return SimpleQuest to a new game without restarting the application: every questline's run ends, and all quest facts,
+     * quest history, and quest time are cleared. Call it when the player starts a new game from your menus, before starting
+     * any questline. Game facts you keep in World State are cleared with the rest, so restore anything meant to outlive a
+     * playthrough (a profile's unlocks, say) from its own save afterward. Like loading a save, this replaces state without
+     * announcing each change, so refresh any UI that outlives the level change.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Save Load", meta = (WorldContext = "WorldContext"))
+    static void ResetQuestState(const UObject* WorldContext);
     
     /**
      * Pauses quest advancement under QuestTag until every hold on it is released. Holding a container holds everything

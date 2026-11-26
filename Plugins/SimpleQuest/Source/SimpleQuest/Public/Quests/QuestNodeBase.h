@@ -163,6 +163,9 @@ class SIMPLEQUEST_API UQuestNodeBase : public UObject
 
     friend class FQuestlineGraphCompiler;
     friend class UQuestManagerSubsystem;
+    
+    /** Test-only: gives a fixture a Deactivated route without compiling a graph. */
+    friend class FQuestRunTeardownTestAccess;
 
 public:
     DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeStarted, UQuestNodeBase*, Node, FGameplayTag, InContextualTag);
@@ -272,6 +275,29 @@ protected:
      * their own transient members; always call Super first.
      */
     virtual void ResetTransientState();
+    
+    /**
+     * Cancels a prerequisite-deferred activation this node is armed on. Keys on IsAwaitingPrerequisite, never on the
+     * contextual tag: a utility node such as a Prerequisite Gate defers with an invalid one, so a tag check leaves it
+     * subscribed with nothing able to disarm it. Returns true when there was something to cancel.
+     */
+    bool CancelDeferredActivation();
+
+    /**
+     * Ends this node's part in its questline's current run. Called by UQuestManagerSubsystem when a run is ended (End
+     * Questline Run) or replaced (a snapshot applied, a new game). Unlike ResetTransientState, this runs against a LIVE
+     * session: it unsubscribes instead of dropping handles, and it leaves alone anything that lasts the instance's whole
+     * registration (an activation group listener's channel, a rule's subscriptions). Override on subclasses that hold
+     * per-run state; always call Super.
+     */
+    virtual void EndRun();
+
+    /**
+     * Called by UQuestManagerSubsystem after a snapshot replaced all of WorldState at once (a load or a new game). That bulk
+     * swap publishes no per-fact events, so a node holding a standing claim about the present re-checks it here. No-op by
+     * default.
+     */
+    virtual void OnQuestStateReplaced() {}
     
     /**
      * Stable per-placement save key. Composed at compile time as CombineGuids(outer-placement-chain, AuthoredNodeGuid),

@@ -9,12 +9,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 This release was prompted by an issue raised by an adopter concerning level
 transitions. Thank you to **kevinpbuckley** for identifying that questlines could
-not be easily scoped to a given level, such as the case where a Questline should
+not be easily scoped to a given level, such as the case where a questline should
 run the progression throughout a single level and reset anytime the player leaves
 and later restarts the same level. Investigation of this gap revealed that the same
 oversight presented complications for other common operations like loading a save
 mid-session and starting a new game from a menu, prompting the creation of two new
-blueprint library functions that afford Questline teardown on demand along with a 
+Blueprint library functions that afford questline teardown on demand along with a 
 handful of internal fixes.
 
 ### Added
@@ -36,7 +36,7 @@ handful of internal fixes.
   with that level, call this from that level's End Play, once for each questline the 
   level owns, while the level's actors still exist. Whether the questline can start again 
   afterward is controlled by its Resettable Replay setting, so turn that on in the 
-  Questline's Graph Defaults level. A questline that isn't loaded has no run, so 
+  questline's Graph Defaults. A questline that isn't loaded has no run, so 
   the call does nothing, and it is skipped while a loaded save is waiting to restore.
   - Thanks to **kevinpbuckley**, who reported this in
     [issue #25](https://github.com/TheGeebus/SimpleQuest/issues/25) with a
